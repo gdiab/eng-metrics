@@ -102,6 +102,8 @@ node dist/cli.js init --client acme --org my-org --auth token --token-env GITHUB
 **Note:** The default token env var name is `GITHUB_TOKEN`, so you can omit `--token-env` when running `init`. If you prefer a different name (e.g., `GITHUB_PERSONAL_ACCESS_TOKEN`), specify it with `--token-env`.
 
 Notes:
+- eng-metrics reads your token from the env var configured during onboarding (`--token-env`, default: `GITHUB_TOKEN`).
+- Internally, eng-metrics passes that value to the GitHub MCP server as `GITHUB_PERSONAL_ACCESS_TOKEN`.
 - eng-metrics runs the MCP server in **read-only** mode.
 - The token never leaves your machine; it is used only to query GitHub.
 
@@ -227,7 +229,7 @@ Send these two files to George:
 
 ## Troubleshooting
 
-- Missing token: ensure `GITHUB_TOKEN` (or your custom token env var) is exported in the same shell.
+- Missing token: ensure your token env var is exported in the same shell (default: `GITHUB_TOKEN`, or whatever you set via `--token-env`).
 - Auth/scopes: ensure your PAT has enough permissions to read the repos you selected.
-- Repo list seems incomplete: onboarding uses GitHub search to fetch the top ~100 recently-updated repos for selection.
+- Repo list seems incomplete: onboarding currently uses GitHub search and shows the top ~100 recently-updated repos for selection.
 
