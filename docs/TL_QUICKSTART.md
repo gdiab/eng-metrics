@@ -215,12 +215,36 @@ node dist/cli.js run --client acme --days 7
 
 You can also run it at any time; it always looks back from “now” unless you pass `--end <ISO>`.
 
+## Run monthly/quarterly reports (from stored data)
+
+These reports read from the local SQLite store (no GitHub calls). They require that weekly runs have already stored PR snapshots.
+
+```bash
+# Last complete month
+node dist/cli.js report --client acme --period monthly
+
+# Explicit month
+node dist/cli.js report --client acme --period monthly --month 2026-01
+
+# Last complete quarter
+node dist/cli.js report --client acme --period quarterly
+
+# Explicit quarter
+node dist/cli.js report --client acme --period quarterly --quarter 2025-Q4
+```
+
+Notes:
+- Default behavior uses the last complete period relative to `--end` (or now if omitted).
+- If the store is empty for that period, you will still get a report but totals will be zero.
+
 ## Share artifacts
 
 Send these two files to George:
 
 - `artifacts/<client>/<YYYY-MM-DD>/weekly-metrics.md`
 - `artifacts/<client>/<YYYY-MM-DD>/weekly-metrics.json`
+- `artifacts/<client>/<YYYY-MM>/monthly-metrics.{md,json}` (if requested)
+- `artifacts/<client>/<YYYY-Q#>/quarterly-metrics.{md,json}` (if requested)
 
 ## Safety
 
@@ -232,4 +256,3 @@ Send these two files to George:
 - Missing token: ensure your token env var is exported in the same shell (default: `GITHUB_TOKEN`, or whatever you set via `--token-env`).
 - Auth/scopes: ensure your PAT has enough permissions to read the repos you selected.
 - Repo list seems incomplete: onboarding currently uses GitHub search and shows the top ~100 recently-updated repos for selection.
-

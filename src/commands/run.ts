@@ -74,7 +74,8 @@ export async function runReport(args: RunArgs) {
   const cfg = loadConfig(args.client);
   const org = cfg.github.org;
 
-  const endIso = args.endIso ?? isoNow();
+  const startedAt = isoNow();
+  const endIso = args.endIso ?? startedAt;
   const startIso = subtractDays(endIso, args.days);
 
   const outDir = args.outDir ?? path.join('artifacts', args.client, endIso.slice(0, 10));
@@ -244,7 +245,25 @@ export async function runReport(args: RunArgs) {
   });
   tx();
 
-  const metrics = computeWeeklyMetrics(enriched as any, { start: startIso, end: endIso, days: args.days });
+  db.prepare(
+    `
+      INSERT INTO runs (id, client, started_at, start_iso, end_iso)
+      VALUES (@id, @client, @started_at, @start_iso, @end_iso)
+    `,
+  ).run({
+    id: runId,
+    client: args.client,
+    started_at: startedAt,
+    start_iso: startIso,
+    end_iso: endIso,
+  });
+
+  const metrics = computeWeeklyMetrics(enriched as any, {
+    start: startIso,
+    end: endIso,
+    days: args.days,
+    period: 'weekly',
+  });
 
   // Display names: start with explicit config overrides.
   // (We can optionally extend this later by resolving names via MCP if needed.)

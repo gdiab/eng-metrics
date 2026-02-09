@@ -28,6 +28,7 @@ Create a new client config, verify GitHub access, select repos, and generate the
    - Preferred output format: `Display Name (login)`.
    - Edit `clients/<client>/client.json` to add `displayNameByLogin` mappings
 7) Run a report for the last 7 days.
+8) (Optional) Generate a monthly or quarterly report from stored data.
 
 ## Commands
 
@@ -42,6 +43,12 @@ node dist/cli.js init --client <client> --org <org> --auth token --repos select
 
 # run report
 node dist/cli.js run --client <client> --days 7
+
+# optional: last complete month
+node dist/cli.js report --client <client> --period monthly
+
+# optional: last complete quarter
+node dist/cli.js report --client <client> --period quarterly
 ```
 
 ### Without GitHub org
@@ -61,12 +68,18 @@ node dist/cli.js init --client <client> --auth token --repos select
 
 # run report
 node dist/cli.js run --client <client> --days 7
+
+# optional: explicit month/quarter from stored data
+node dist/cli.js report --client <client> --period monthly --month 2026-01
+node dist/cli.js report --client <client> --period quarterly --quarter 2025-Q4
 ```
 
 ## File locations
 - Config: `clients/<client>/client.json` (gitignored)
 - Store: `clients/<client>/store/` (SQLite database, gitignored)
 - Reports: `artifacts/<client>/<YYYY-MM-DD>/weekly-metrics.{md,json}`
+- Monthly: `artifacts/<client>/<YYYY-MM>/monthly-metrics.{md,json}`
+- Quarterly: `artifacts/<client>/<YYYY-Q#>/quarterly-metrics.{md,json}`
 
 ## Validation checklist
 - Report files exist: `artifacts/<client>/<YYYY-MM-DD>/weekly-metrics.md` + `.json`
@@ -74,6 +87,7 @@ node dist/cli.js run --client <client> --days 7
 - Repo selection matches expectation (all vs allowlist)
 - Per-repo PR counts shown in logs during run
 - All configured repos are searched (check logs for "PRs found per repo")
+- Monthly/quarterly reports generate from the local SQLite store
 
 ## Automation
 

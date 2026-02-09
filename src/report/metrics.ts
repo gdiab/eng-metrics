@@ -1,4 +1,5 @@
 import { PullRequest, Review, Commit } from '../github/types.js';
+import { ReportWindow } from './periods.js';
 
 export type PullRequestEnriched = {
   pr: PullRequest;
@@ -6,8 +7,8 @@ export type PullRequestEnriched = {
   commits: Commit[];
 };
 
-export type WeeklyMetrics = {
-  window: { start: string; end: string; days: number };
+export type ReportMetrics = {
+  window: ReportWindow;
   totals: {
     prsOpened: number;
     prsMerged: number;
@@ -36,11 +37,11 @@ function median(nums: number[]): number | undefined {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
-export function computeWeeklyMetrics(items: PullRequestEnriched[], window: { start: string; end: string; days: number }): WeeklyMetrics {
+export function computeReportMetrics(items: PullRequestEnriched[], window: ReportWindow): ReportMetrics {
   const startMs = Date.parse(window.start);
   const endMs = Date.parse(window.end);
 
-  const byAuthor: WeeklyMetrics['byAuthor'] = {};
+  const byAuthor: ReportMetrics['byAuthor'] = {};
   const ensure = (login: string) => {
     byAuthor[login] ??= { prsOpened: 0, prsMerged: 0, prsClosedUnmerged: 0 };
     return byAuthor[login];
@@ -102,4 +103,16 @@ export function computeWeeklyMetrics(items: PullRequestEnriched[], window: { sta
     totals: { prsOpened, prsMerged, prsClosedUnmerged },
     byAuthor,
   };
+}
+
+export type WeeklyMetrics = ReportMetrics;
+
+export function computeWeeklyMetrics(
+  items: PullRequestEnriched[],
+  window: Omit<ReportWindow, 'period'> & { period?: ReportWindow['period'] },
+): WeeklyMetrics {
+  return computeReportMetrics(items, {
+    ...window,
+    period: window.period ?? 'weekly',
+  });
 }

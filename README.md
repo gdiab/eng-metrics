@@ -1,13 +1,13 @@
 # eng-metrics (WIP)
 
-A multi-client, config-driven CLI that pulls GitHub activity and generates weekly engineering metrics.
+A multi-client, config-driven CLI that pulls GitHub activity and generates weekly engineering metrics, plus monthly/quarterly reports from stored data.
 
 ## Goals
 - Works across multiple client engagements (different GitHub orgs + auth)
 - Onboarding via CLI (`init` / `reinit`)
 - Runnable on-demand (defaults to “past 7 days”) and automatable (cron/GitHub Actions)
 - Output: Markdown report + JSON metrics
-- Persist raw data so you can later generate last-month / last-quarter views
+- Persist raw data so you can generate last-month / last-quarter views
 
 ## Quickstart
 
@@ -166,11 +166,37 @@ done
 Reports are saved to:
 - `artifacts/<client>/<YYYY-MM-DD>/weekly-metrics.md`
 - `artifacts/<client>/<YYYY-MM-DD>/weekly-metrics.json`
+- `artifacts/<client>/<YYYY-MM>/monthly-metrics.md`
+- `artifacts/<client>/<YYYY-MM>/monthly-metrics.json`
+- `artifacts/<client>/<YYYY-Q#>/quarterly-metrics.md`
+- `artifacts/<client>/<YYYY-Q#>/quarterly-metrics.json`
 
 You can:
 - Commit artifacts to git (if not gitignored)
 - Upload to a shared drive/cloud storage
 - Store in a database for historical analysis
+
+## Monthly/Quarterly Reports (from stored data)
+
+Monthly and quarterly reports are generated from the local SQLite store (no GitHub calls).
+
+```bash
+# Last complete month (based on now)
+node dist/cli.js report --client acme --period monthly
+
+# Explicit month
+node dist/cli.js report --client acme --period monthly --month 2026-01
+
+# Last complete quarter (based on now)
+node dist/cli.js report --client acme --period quarterly
+
+# Explicit quarter
+node dist/cli.js report --client acme --period quarterly --quarter 2025-Q4
+```
+
+**Notes:**
+- Default behavior uses the last complete period relative to `--end` (or now if omitted).
+- Monthly/quarterly reports depend on what has been stored in `clients/<client>/store/metrics.sqlite`. Run weekly reports regularly to build history.
 
 ## Status
 WIP — GitHub-only implementation is working; MCP-backed read-only mode is the default.

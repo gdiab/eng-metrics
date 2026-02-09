@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import { initClient, reinitClient } from './commands/init.js';
 import { runReport } from './commands/run.js';
+import { runStoredReport } from './commands/report.js';
 
 const program = new Command();
 
@@ -61,6 +62,30 @@ program
     await runReport({
       client: opts.client,
       days: Number(opts.days),
+      endIso: opts.end,
+      outDir: opts.out,
+    });
+  });
+
+program
+  .command('report')
+  .description('Generate a monthly or quarterly report from stored data')
+  .requiredOption('-c, --client <slug>', 'Client slug (e.g. acme)')
+  .requiredOption('--period <period>', 'Period: monthly | quarterly')
+  .option('--month <yyyy-mm>', 'Explicit month for monthly reports (YYYY-MM)')
+  .option('--quarter <yyyy-qn>', 'Explicit quarter for quarterly reports (YYYY-Q[1-4])')
+  .option('--end <iso>', 'Anchor timestamp (ISO). Defaults to now; uses last complete period')
+  .option('--out <dir>', 'Output directory (default: artifacts/<client>/<period-label>)')
+  .action(async (opts) => {
+    const period = String(opts.period).toLowerCase();
+    if (period !== 'monthly' && period !== 'quarterly') {
+      throw new Error(`Invalid period: ${opts.period}. Use "monthly" or "quarterly".`);
+    }
+    await runStoredReport({
+      client: opts.client,
+      period,
+      month: opts.month,
+      quarter: opts.quarter,
       endIso: opts.end,
       outDir: opts.out,
     });

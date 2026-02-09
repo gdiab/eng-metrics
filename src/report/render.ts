@@ -1,4 +1,4 @@
-import { WeeklyMetrics } from './metrics.js';
+import { ReportMetrics } from './metrics.js';
 
 function formatPerson(login: string, displayNameByLogin: Record<string, string>) {
   const display = displayNameByLogin[login];
@@ -9,14 +9,25 @@ function formatPerson(login: string, displayNameByLogin: Record<string, string>)
 export function renderMarkdown(
   client: string,
   org: string,
-  metrics: WeeklyMetrics,
+  metrics: ReportMetrics,
   displayNameByLogin: Record<string, string> = {},
 ) {
   const lines: string[] = [];
-  lines.push(`# Weekly engineering metrics (${client})`);
+  const title =
+    metrics.window.period === 'weekly'
+      ? 'Weekly'
+      : metrics.window.period === 'monthly'
+        ? 'Monthly'
+        : 'Quarterly';
+  lines.push(`# ${title} engineering metrics (${client})`);
   lines.push('');
   lines.push(`Org: **${org}**`);
-  lines.push(`Window: **${metrics.window.start} → ${metrics.window.end}** (last ${metrics.window.days} days)`);
+  if (metrics.window.label) {
+    lines.push(`Period: **${metrics.window.label}**`);
+  }
+  const windowLabel =
+    metrics.window.period === 'weekly' ? `last ${metrics.window.days} days` : `${metrics.window.days} days`;
+  lines.push(`Window: **${metrics.window.start} → ${metrics.window.end}** (${windowLabel})`);
   lines.push('');
 
   lines.push('## Totals');

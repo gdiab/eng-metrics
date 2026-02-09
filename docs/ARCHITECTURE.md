@@ -8,6 +8,9 @@ Today the tool is a config-driven CLI:
 - **Data source**: GitHub via `gh api` (either using gh auth or explicit token header)
 - **Storage**: per-client SQLite store (`clients/<client>/store/metrics.sqlite`) for raw PR snapshots
 - **Outputs**: Markdown report + JSON summary under `artifacts/<client>/<date>/`
+  - Weekly: `artifacts/<client>/<YYYY-MM-DD>/weekly-metrics.*`
+  - Monthly: `artifacts/<client>/<YYYY-MM>/monthly-metrics.*`
+  - Quarterly: `artifacts/<client>/<YYYY-Q#>/quarterly-metrics.*`
 
 This is intentionally simple so we can ship and iterate.
 
@@ -22,7 +25,7 @@ To align with the blog post example and keep the layers clean, we should split:
 - **Skills** (procedure)
   - Onboarding a client engagement
   - Running weekly report + validation
-  - Backfilling a month/quarter
+  - Backfilling a month/quarter (from stored data)
   - Updating people/team mappings
 
 - **Runtime**
