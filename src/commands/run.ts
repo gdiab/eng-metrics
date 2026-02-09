@@ -100,28 +100,101 @@ export async function runReport(args: RunArgs) {
     env: { ...process.env, GITHUB_PERSONAL_ACCESS_TOKEN: token } as Record<string, string>,
   });
 
-  const q = buildSearchQuery(org, cfg.github.repos, startIso, endIso);
-  const searchScope = org ? `org=${org}` : `repos=${cfg.github.repos.allowlist.join(',')}`;
-  console.log(`[${args.client}] Fetching PRs via MCP for ${searchScope} window=${startIso}..${endIso}`);
+  // GitHub search API limits: max ~5-10 repo qualifiers per query, max 100 results per page
+  // If we have many repos without org, we need to batch them or search individually
+  const allItems: any[] = [];
   
-  const search = await mcpSearchPRs(mcp as any, q, { perPage: 100, page: 1, sort: 'updated', order: 'desc' });
-  const items: any[] = search.items ?? [];
+  if (org) {
+    // With org: single query, but need pagination
+    const q = buildSearchQuery(org, cfg.github.repos, startIso, endIso);
+    console.log(`[${args.client}] Fetching PRs via MCP for org=${org} window=${startIso}..${endIso}`);
+    
+    let page = 1;
+    let hasMore = true;
+    while (hasMore) {
+      const search = await mcpSearchPRs(mcp as any, q, { perPage: 100, page, sort: 'updated', order: 'desc' });
+      const items = search.items ?? [];
+      allItems.push(...items);
+      
+      // GitHub search API returns max 1000 results total, and we check if we got a full page
+      hasMore = items.length === 100 && allItems.length < 1000;
+      if (hasMore) {
+        page++;
+        console.log(`[${args.client}] Fetched ${allItems.length} PRs so far, continuing...`);
+      }
+    }
+  } else if (cfg.github.repos.mode === 'allowlist' && cfg.github.repos.allowlist.length > 0) {
+    // Without org: batch repos (GitHub supports ~5-10 repo qualifiers per query)
+    const repoBatches: string[][] = [];
+    const BATCH_SIZE = 5; // Conservative: GitHub supports ~5-10, use 5 to be safe
+    
+    for (let i = 0; i < cfg.github.repos.allowlist.length; i += BATCH_SIZE) {
+      repoBatches.push(cfg.github.repos.allowlist.slice(i, i + BATCH_SIZE));
+    }
+    
+    console.log(`[${args.client}] Fetching PRs via MCP for ${cfg.github.repos.allowlist.length} repos (in ${repoBatches.length} batches) window=${startIso}..${endIso}`);
+    
+    for (let batchIdx = 0; batchIdx < repoBatches.length; batchIdx++) {
+      const batch = repoBatches[batchIdx];
+      const reposConfig = { mode: 'allowlist' as const, allowlist: batch };
+      const q = buildSearchQuery(undefined, reposConfig, startIso, endIso);
+      
+      let page = 1;
+      let hasMore = true;
+      while (hasMore) {
+        const search = await mcpSearchPRs(mcp as any, q, { perPage: 100, page, sort: 'updated', order: 'desc' });
+        const items = search.items ?? [];
+        allItems.push(...items);
+        
+        hasMore = items.length === 100 && allItems.length < 1000;
+        if (hasMore) {
+          page++;
+        }
+      }
+      
+      console.log(`[${args.client}] Batch ${batchIdx + 1}/${repoBatches.length}: found ${allItems.length} total PRs so far`);
+    }
+  } else {
+    throw new Error('Cannot search: no org and no repos specified');
+  }
+  
+  const items = allItems;
 
   // Filter by allowlist if needed (when org is present and using allowlist mode)
+  // Also track PRs per repo for logging
+  const prsByRepo = new Map<string, number>();
+  
   const wanted = items.filter((it) => {
     const m = String(it.html_url ?? '').match(/github\.com\/(.+?)\/(.+?)\/pull\/(\d+)/);
     if (!m) return false;
     
+    const owner = m[1];
+    const repoName = m[2];
+    const repoFullName = `${owner}/${repoName}`;
+    
     if (org && cfg.github.repos.mode === 'allowlist') {
       // With org: filter by repo name only
-      const repoName = m[2];
-      return cfg.github.repos.allowlist.includes(repoName);
+      if (!cfg.github.repos.allowlist.includes(repoName)) {
+        return false;
+      }
     }
+    
+    // Track PRs per repo
+    prsByRepo.set(repoFullName, (prsByRepo.get(repoFullName) || 0) + 1);
     
     // Without org: repos are already filtered by the search query
     // Or with org + "all" mode: include everything
     return true;
   });
+  
+  // Log PR counts per repo
+  if (prsByRepo.size > 0) {
+    console.log(`[${args.client}] PRs found per repo:`);
+    const sortedRepos = Array.from(prsByRepo.entries()).sort((a, b) => b[1] - a[1]);
+    for (const [repo, count] of sortedRepos) {
+      console.log(`  ${repo}: ${count} PR(s)`);
+    }
+  }
 
   console.log(`[${args.client}] Enriching ${wanted.length} PRs via MCP (details + reviews)`);
   const enriched = [] as { pr: any; reviews: any[]; commits: any[] }[];

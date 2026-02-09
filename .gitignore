@@ -1,6 +1,4 @@
 node_modules
 .DS_Store
 artifacts
-clients/*/store/*.sqlite
-clients/*/store/*.sqlite-*
-clients/*/client.json
+clients/
