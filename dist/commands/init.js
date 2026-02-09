@@ -160,9 +160,9 @@ export async function initClient(args) {
     console.log(`Config: ${path.join(dir, 'client.json')}`);
     console.log(`Store:  ${path.join(dir, 'store')}`);
     if (!parsed.github.org) {
-        console.log(`\n⚠️  Note: GitHub org not set. Set it with:`);
-        console.log(`   reinit --client ${args.client} --org <org-name>`);
-        console.log(`   (Org is required to run reports)`);
+        console.log(`\n⚠️  Note: GitHub org not set.`);
+        console.log(`   - Reports can still run if your repo allowlist uses owner/repo format (e.g. gdiab/eng-metrics).`);
+        console.log(`   - Otherwise set org with: reinit --client ${args.client} --org <org-name>`);
     }
 }
 export async function reinitClient(args) {
