@@ -3,11 +3,11 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { loadConfig } from '../config.js';
 import { ensureDir } from '../paths.js';
-import { GitHubClient } from '../github/client.js';
-import { searchPullRequests, listReviews, listCommits, getUserProfile } from '../github/fetch.js';
 import { openDb } from '../store/db.js';
 import { computeWeeklyMetrics } from '../report/metrics.js';
 import { renderMarkdown } from '../report/render.js';
+import { connectGithubMcp } from '../mcp/github/client.js';
+import { searchPullRequests as mcpSearchPRs, pullRequestGet, pullRequestReviews } from '../mcp/github/api.js';
 function isoNow() {
     return new Date().toISOString();
 }
@@ -26,20 +26,45 @@ export async function runReport(args) {
     const outDir = args.outDir ?? path.join('artifacts', args.client, endIso.slice(0, 10));
     ensureDir(outDir);
     const runId = crypto.randomUUID();
-    const gh = new GitHubClient(cfg);
-    console.log(`[${args.client}] Fetching PRs for org=${org} window=${startIso}..${endIso}`);
-    const prsAll = await searchPullRequests(gh, org, startIso, endIso);
-    const prs = cfg.github.repos.mode === 'allowlist'
-        ? prsAll.filter((pr) => cfg.github.repos.allowlist.includes(pr.base.repo.name))
-        : prsAll;
-    console.log(`[${args.client}] Enriching ${prs.length} PRs (reviews + commits)`);
-    const enriched = [];
-    for (const pr of prs) {
-        const full = pr.base.repo.full_name;
-        const reviews = await listReviews(gh, full, pr.number);
-        const commits = await listCommits(gh, full, pr.number);
-        enriched.push({ pr, reviews, commits });
+    // MCP: spawn GitHub's official MCP server locally in read-only mode (stdio).
+    // Token handling:
+    // - For portability, we expect auth.mode=token and tokenEnv to be set.
+    // - If auth.mode=gh, we still rely on tokenEnv being present (TLs may not have gh installed).
+    const tokenEnv = cfg.github.auth.tokenEnv ?? 'GITHUB_PERSONAL_ACCESS_TOKEN';
+    const token = process.env[tokenEnv];
+    if (!token) {
+        throw new Error(`Missing GitHub token env var ${tokenEnv}. For TL-run usage, set auth=token and export ${tokenEnv}=<PAT>.`);
     }
+    const mcp = await connectGithubMcp({
+        readOnly: true,
+        toolsets: 'default',
+        env: { ...process.env, GITHUB_PERSONAL_ACCESS_TOKEN: token },
+    });
+    console.log(`[${args.client}] Fetching PRs via MCP for org=${org} window=${startIso}..${endIso}`);
+    const q = `org:${org} is:pr updated:${startIso}..${endIso}`;
+    const search = await mcpSearchPRs(mcp, q, { perPage: 100, page: 1, sort: 'updated', order: 'desc' });
+    const items = search.items ?? [];
+    const wanted = items.filter((it) => {
+        const m = String(it.html_url ?? '').match(/github\.com\/(.+?)\/(.+?)\/pull\/(\d+)/);
+        if (!m)
+            return false;
+        const repoName = m[2];
+        return cfg.github.repos.mode === 'allowlist' ? cfg.github.repos.allowlist.includes(repoName) : true;
+    });
+    console.log(`[${args.client}] Enriching ${wanted.length} PRs via MCP (details + reviews)`);
+    const enriched = [];
+    for (const it of wanted) {
+        const m = String(it.html_url ?? '').match(/github\.com\/(.+?)\/(.+?)\/pull\/(\d+)/);
+        if (!m)
+            continue;
+        const owner = m[1];
+        const repo = m[2];
+        const num = Number(m[3]);
+        const pr = await pullRequestGet(mcp, owner, repo, num);
+        const reviews = await pullRequestReviews(mcp, owner, repo, num);
+        enriched.push({ pr, reviews: reviews ?? [], commits: [] });
+    }
+    await mcp.close();
     // Persist PRs (so we can do month/quarter later)
     const db = openDb(args.client);
     const insert = db.prepare(`
@@ -70,16 +95,9 @@ export async function runReport(args) {
     });
     tx();
     const metrics = computeWeeklyMetrics(enriched, { start: startIso, end: endIso, days: args.days });
-    // Display names: prefer explicit config overrides, otherwise try GitHub profile name.
+    // Display names: start with explicit config overrides.
+    // (We can optionally extend this later by resolving names via MCP if needed.)
     const displayNameByLogin = { ...cfg.github.people.displayNameByLogin };
-    const uniqueLogins = Array.from(new Set(Object.keys(metrics.byAuthor)));
-    for (const login of uniqueLogins) {
-        if (displayNameByLogin[login])
-            continue;
-        const profile = await getUserProfile(gh, login);
-        if (profile?.name)
-            displayNameByLogin[login] = profile.name;
-    }
     const md = renderMarkdown(args.client, org, metrics, displayNameByLogin);
     const mdPath = path.join(outDir, 'weekly-metrics.md');
     const jsonPath = path.join(outDir, 'weekly-metrics.json');

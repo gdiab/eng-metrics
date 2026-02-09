@@ -13,6 +13,7 @@
     "format": "prettier -w ."
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "better-sqlite3": "^11.8.1",
     "commander": "^13.1.0",
     "prompts": "^2.4.2",
