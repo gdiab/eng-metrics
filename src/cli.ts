@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import 'dotenv/config';
 import { Command } from 'commander';
 import { initClient, reinitClient } from './commands/init.js';
 import { runReport } from './commands/run.js';

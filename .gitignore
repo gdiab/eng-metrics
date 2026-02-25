@@ -2,3 +2,7 @@ node_modules
 .DS_Store
 artifacts
 clients/
+dist
+
+# Local env files (do not commit)
+.env
