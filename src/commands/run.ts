@@ -27,47 +27,44 @@ type RunArgs = {
 };
 
 function buildSearchQuery(
-  org: string | undefined,
-  repos: { mode: 'all' | 'allowlist'; allowlist: string[] },
+  repoFullNames: string[],
   startIso: string,
   endIso: string,
 ): string {
   const timeRange = `updated:${startIso}..${endIso}`;
-  
-  if (org) {
-    // Org-based search: use org filter
-    return `org:${org} is:pr ${timeRange}`;
-  }
-  
-  // No org: must have specific repos in allowlist
-  if (repos.mode === 'allowlist' && repos.allowlist.length > 0) {
-    // Check if repos are in "owner/repo" format or just "repo" format
-    const repoQueries = repos.allowlist.map((repo) => {
-      if (repo.includes('/')) {
-        // Full format: "owner/repo"
-        return `repo:${repo}`;
-      } else {
-        // Just repo name - can't search without owner, so skip
-        return null;
-      }
-    }).filter((q): q is string => q !== null);
-    
-    if (repoQueries.length === 0) {
-      throw new Error(
-        `Cannot search without org: repos in allowlist must be in "owner/repo" format (e.g., "gdiab/my-repo"). ` +
-        `Found: ${repos.allowlist.join(', ')}`
-      );
-    }
-    
-    return `${repoQueries.join(' ')} is:pr ${timeRange}`;
-  }
-  
-  // No org and no specific repos: can't proceed
-  throw new Error(
-    `Missing github.org in client config and no repos specified. ` +
-    `Either set org with: reinit --client <client> --org <org>, ` +
-    `or specify repos in "owner/repo" format.`
+  const repoQueries = repoFullNames.map((r) => `repo:${r}`).join(' ');
+  return `${repoQueries} is:pr ${timeRange}`;
+}
+
+function buildOrgSearchQuery(org: string, startIso: string, endIso: string): string {
+  return `org:${org} is:pr updated:${startIso}..${endIso}`;
+}
+
+/**
+ * Resolve the list of "owner/repo" strings to search.
+ * - org + all  → null (use org-wide query)
+ * - org + allowlist → expand short names with org prefix
+ * - no org + allowlist → must already be "owner/repo"
+ */
+function resolveRepoList(
+  org: string | undefined,
+  repos: { mode: 'all' | 'allowlist'; allowlist: string[] },
+): string[] | null {
+  if (org && repos.mode === 'all') return null;
+
+  const names = repos.allowlist.map((r) =>
+    r.includes('/') ? r : org ? `${org}/${r}` : null,
   );
+  const valid = names.filter((n): n is string => n !== null);
+
+  if (valid.length === 0) {
+    throw new Error(
+      org
+        ? `Allowlist is empty — add repos to github.repos.allowlist or set mode to "all".`
+        : `Cannot search without org: repos must be in "owner/repo" format. Found: ${repos.allowlist.join(', ')}`,
+    );
+  }
+  return valid;
 }
 
 export async function runReport(args: RunArgs) {
@@ -101,115 +98,90 @@ export async function runReport(args: RunArgs) {
     env: { ...process.env, GITHUB_PERSONAL_ACCESS_TOKEN: token } as Record<string, string>,
   });
 
-  // GitHub search API limits: max ~5-10 repo qualifiers per query, max 100 results per page
-  // If we have many repos without org, we need to batch them or search individually
+  const repoList = resolveRepoList(org, cfg.github.repos);
   const allItems: any[] = [];
-  
-  if (org) {
-    // With org: single query, but need pagination
-    const q = buildSearchQuery(org, cfg.github.repos, startIso, endIso);
-    console.log(`[${args.client}] Fetching PRs via MCP for org=${org} window=${startIso}..${endIso}`);
-    
-    let page = 1;
-    let hasMore = true;
-    while (hasMore) {
-      const search = await mcpSearchPRs(mcp as any, q, { perPage: 100, page, sort: 'updated', order: 'desc' });
-      const items = search.items ?? [];
-      allItems.push(...items);
-      
-      // GitHub search API returns max 1000 results total, and we check if we got a full page
-      hasMore = items.length === 100 && allItems.length < 1000;
-      if (hasMore) {
-        page++;
-        console.log(`[${args.client}] Fetched ${allItems.length} PRs so far, continuing...`);
-      }
+  const BATCH_SIZE = 5;
+
+  if (repoList) {
+    // Targeted search: query only the repos we care about (batched)
+    const batches: string[][] = [];
+    for (let i = 0; i < repoList.length; i += BATCH_SIZE) {
+      batches.push(repoList.slice(i, i + BATCH_SIZE));
     }
-  } else if (cfg.github.repos.mode === 'allowlist' && cfg.github.repos.allowlist.length > 0) {
-    // Without org: batch repos (GitHub supports ~5-10 repo qualifiers per query)
-    const repoBatches: string[][] = [];
-    const BATCH_SIZE = 5; // Conservative: GitHub supports ~5-10, use 5 to be safe
-    
-    for (let i = 0; i < cfg.github.repos.allowlist.length; i += BATCH_SIZE) {
-      repoBatches.push(cfg.github.repos.allowlist.slice(i, i + BATCH_SIZE));
-    }
-    
-    console.log(`[${args.client}] Fetching PRs via MCP for ${cfg.github.repos.allowlist.length} repos (in ${repoBatches.length} batches) window=${startIso}..${endIso}`);
-    
-    for (let batchIdx = 0; batchIdx < repoBatches.length; batchIdx++) {
-      const batch = repoBatches[batchIdx];
-      const reposConfig = { mode: 'allowlist' as const, allowlist: batch };
-      const q = buildSearchQuery(undefined, reposConfig, startIso, endIso);
-      
+    console.log(`[${args.client}] Fetching PRs via MCP for ${repoList.length} repo(s) window=${startIso}..${endIso}`);
+
+    for (let bi = 0; bi < batches.length; bi++) {
+      const q = buildSearchQuery(batches[bi], startIso, endIso);
       let page = 1;
       let hasMore = true;
       while (hasMore) {
         const search = await mcpSearchPRs(mcp as any, q, { perPage: 100, page, sort: 'updated', order: 'desc' });
         const items = search.items ?? [];
         allItems.push(...items);
-        
         hasMore = items.length === 100 && allItems.length < 1000;
         if (hasMore) {
           page++;
+          console.log(`[${args.client}] Fetched ${allItems.length} PRs so far, continuing...`);
         }
       }
-      
-      console.log(`[${args.client}] Batch ${batchIdx + 1}/${repoBatches.length}: found ${allItems.length} total PRs so far`);
-    }
-  } else {
-    throw new Error('Cannot search: no org and no repos specified');
-  }
-  
-  const items = allItems;
-
-  // Filter by allowlist if needed (when org is present and using allowlist mode)
-  // Also track PRs per repo for logging
-  const prsByRepo = new Map<string, number>();
-  
-  const wanted = items.filter((it) => {
-    const m = String(it.html_url ?? '').match(/github\.com\/(.+?)\/(.+?)\/pull\/(\d+)/);
-    if (!m) return false;
-    
-    const owner = m[1];
-    const repoName = m[2];
-    const repoFullName = `${owner}/${repoName}`;
-    
-    if (org && cfg.github.repos.mode === 'allowlist') {
-      // With org: filter by repo name only
-      if (!cfg.github.repos.allowlist.includes(repoName)) {
-        return false;
+      if (batches.length > 1) {
+        console.log(`[${args.client}] Batch ${bi + 1}/${batches.length}: ${allItems.length} total PRs so far`);
       }
     }
-    
-    // Track PRs per repo
-    prsByRepo.set(repoFullName, (prsByRepo.get(repoFullName) || 0) + 1);
-    
-    // Without org: repos are already filtered by the search query
-    // Or with org + "all" mode: include everything
+  } else {
+    // org + "all" mode: search entire org
+    const q = buildOrgSearchQuery(org!, startIso, endIso);
+    console.log(`[${args.client}] Fetching PRs via MCP for org=${org} window=${startIso}..${endIso}`);
+    let page = 1;
+    let hasMore = true;
+    while (hasMore) {
+      const search = await mcpSearchPRs(mcp as any, q, { perPage: 100, page, sort: 'updated', order: 'desc' });
+      const items = search.items ?? [];
+      allItems.push(...items);
+      hasMore = items.length === 100 && allItems.length < 1000;
+      if (hasMore) {
+        page++;
+        console.log(`[${args.client}] Fetched ${allItems.length} PRs so far, continuing...`);
+      }
+    }
+  }
+
+  // Track PRs per repo for logging
+  const prsByRepo = new Map<string, number>();
+  const wanted = allItems.filter((it) => {
+    const m = String(it.html_url ?? '').match(/github\.com\/(.+?)\/(.+?)\/pull\/(\d+)/);
+    if (!m) return false;
+    prsByRepo.set(`${m[1]}/${m[2]}`, (prsByRepo.get(`${m[1]}/${m[2]}`) || 0) + 1);
     return true;
   });
-  
-  // Log PR counts per repo
+
   if (prsByRepo.size > 0) {
     console.log(`[${args.client}] PRs found per repo:`);
-    const sortedRepos = Array.from(prsByRepo.entries()).sort((a, b) => b[1] - a[1]);
-    for (const [repo, count] of sortedRepos) {
+    for (const [repo, count] of Array.from(prsByRepo.entries()).sort((a, b) => b[1] - a[1])) {
       console.log(`  ${repo}: ${count} PR(s)`);
     }
   }
 
-  console.log(`[${args.client}] Enriching ${wanted.length} PRs via MCP (details + reviews)`);
-  const enriched = [] as { pr: any; reviews: any[]; commits: any[] }[];
-  for (const it of wanted) {
-    const m = String(it.html_url ?? '').match(/github\.com\/(.+?)\/(.+?)\/pull\/(\d+)/);
-    if (!m) continue;
-    const owner = m[1];
-    const repo = m[2];
-    const num = Number(m[3]);
+  // Enrich PRs: fetch details + reviews in parallel (capped concurrency)
+  const CONCURRENCY = 5;
+  console.log(`[${args.client}] Enriching ${wanted.length} PRs via MCP (details + reviews, concurrency=${CONCURRENCY})`);
+  const enriched: { pr: any; reviews: any[]; commits: any[] }[] = [];
 
-    const pr = await pullRequestGet(mcp as any, owner, repo, num);
-    const reviews = await pullRequestReviews(mcp as any, owner, repo, num);
-
-    enriched.push({ pr, reviews: reviews ?? [], commits: [] });
+  for (let i = 0; i < wanted.length; i += CONCURRENCY) {
+    const batch = wanted.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(async (it) => {
+        const m = String(it.html_url ?? '').match(/github\.com\/(.+?)\/(.+?)\/pull\/(\d+)/);
+        if (!m) return null;
+        const [owner, repo, num] = [m[1], m[2], Number(m[3])];
+        const [pr, reviews] = await Promise.all([
+          pullRequestGet(mcp as any, owner, repo, num),
+          pullRequestReviews(mcp as any, owner, repo, num),
+        ]);
+        return { pr, reviews: reviews ?? [], commits: [] };
+      }),
+    );
+    enriched.push(...results.filter((r): r is NonNullable<typeof r> => r !== null));
   }
 
   await mcp.close();
